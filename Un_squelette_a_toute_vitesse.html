@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Les mots qui bougent</title>
+<style>
+  :root { --chalk: #f6f3df; --wood: #7a4a2a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Trebuchet MS", "Arial Rounded MT Bold", sans-serif;
+    background: var(--wood);
+    display: flex; flex-direction: column; padding: clamp(8px, 2vw, 20px);
+    gap: 10px;
+  }
+  header {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    color:#fff7e5; flex-wrap:wrap;
+  }
+  h1 { font-size: clamp(1.15rem, 2.5vw, 1.8rem); margin:0; }
+  .controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  #counter { font-weight:700; }
+  button.control {
+    border:2px solid #fff7e5; border-radius:10px; background:#fff7e5; color:#34291f;
+    padding:8px 13px; font:inherit; font-weight:700; cursor:pointer;
+  }
+  #board {
+    flex:1; min-height:0; position:relative; overflow:hidden; isolation:isolate;
+    border:10px solid #4c2d1a; border-radius:7px;
+    background:
+      radial-gradient(ellipse at 25% 25%, rgba(255,255,255,.035), transparent 45%),
+      radial-gradient(ellipse at 70% 75%, rgba(255,255,255,.025), transparent 40%),
+      #173c35;
+    box-shadow: inset 0 0 22px rgba(0,0,0,.55), 0 5px 10px rgba(0,0,0,.25);
+  }
+  #board::after {
+    content:""; position:absolute; inset:0; pointer-events:none; z-index:0; opacity:.12;
+    background-image: repeating-linear-gradient(0deg, transparent 0 5px, #fff 6px, transparent 7px);
+  }
+  .word {
+    position:absolute; z-index:1; white-space:nowrap; color:var(--chalk);
+    font-size:clamp(18px, 2.2vw, 31px); font-weight:700; letter-spacing:.3px;
+    text-shadow:0 0 2px rgba(255,255,255,.45), 1px 2px 2px rgba(0,0,0,.45);
+    border:0; padding:5px 8px; margin:0; background:transparent; cursor:pointer;
+    user-select:none; touch-action:manipulation;
+    transform:translate(-50%,-50%);
+    transition: color .15s ease, text-shadow .15s ease;
+  }
+  .word:hover, .word:focus-visible { color:#fff; text-shadow:0 0 9px rgba(255,255,255,.8); outline:2px dashed rgba(255,255,255,.65); border-radius:5px; }
+  .word.found { animation: vanish .18s ease-out forwards; pointer-events:none; }
+  @keyframes vanish { to { opacity:0; transform:translate(-50%,-50%) scale(.65); } }
+  #message {
+    color:#fff7e5; text-align:center; font-size:clamp(.85rem, 1.7vw, 1rem);
+    min-height:1.2em;
+  }
+  @media (prefers-reduced-motion: reduce) { .word.found { animation:none; opacity:0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧑‍🏫 Les mots qui bougent</h1>
+  <div class="controls">
+    <span id="counter" aria-live="polite">Mots trouvés : 0 / 27</span>
+    <button class="control" id="pauseBtn" type="button">⏸ Pause</button>
+    <button class="control" id="restartBtn" type="button">↻ Recommencer</button>
+  </div>
+</header>
+<main id="board" aria-label="Tableau noir avec des mots à cliquer"></main>
+<div id="message" aria-live="polite">Clique sur un mot pour le faire disparaître !</div>
+<script>
+(() => {
+  const words = [
+    "vitesse", "trompette", "sonnette", "caresse", "lunettes", "cachette",
+    "impolitesse", "adresse", "gentillesse", "assiette", "souplesse",
+    "bicyclette", "recette", "allumette", "chouette", "raquette",
+    "poussette", "princesse", "fillette", "omelette", "vedette", "mouette",
+    "casquette", "fesses", "serviette", "squelette", "crevette"
+  ];
+  const board = document.getElementById("board");
+  const counter = document.getElementById("counter");
+  const message = document.getElementById("message");
+  const pauseBtn = document.getElementById("pauseBtn");
+  let items = [], found = 0, paused = false, lastTime = 0, raf = null;
+
+  function size() {
+    const r = board.getBoundingClientRect();
+    return { w: r.width, h: r.height };
+  }
+  function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+  function createGame() {
+    if (raf) cancelAnimationFrame(raf);
+    board.innerHTML = "";
+    items = []; found = 0; paused = false; lastTime = 0;
+    pauseBtn.textContent = "⏸ Pause";
+    counter.textContent = `Mots trouvés : 0 / ${words.length}`;
+    message.textContent = "Clique sur un mot pour le faire disparaître !";
+    const {w,h} = size();
+    const shuffled = [...words].sort(() => Math.random() - .5);
+    shuffled.forEach((word, i) => {
+      const el = document.createElement("button");
+      el.type = "button"; el.className = "word"; el.textContent = word;
+      el.setAttribute("aria-label", `Faire disparaître le mot ${word}`);
+      board.appendChild(el);
+      const fontSize = parseFloat(getComputedStyle(el).fontSize);
+      const approxW = Math.max(70, word.length * fontSize * .58 + 20);
+      const x = 30 + Math.random() * Math.max(1, w - 60);
+      const y = 25 + Math.random() * Math.max(1, h - 50);
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 10 + Math.random() * 13; // déplacement lent, en pixels/seconde
+      const item = {
+        el, word, x: clamp(x, approxW/2, w-approxW/2), y: clamp(y, 24, h-24),
+        vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+        halfW: approxW/2, halfH: Math.max(18, fontSize*.8), alive: true
+      };
+      el.style.left = item.x + "px"; el.style.top = item.y + "px";
+      el.addEventListener("click", () => {
+        if (!item.alive) return;
+        item.alive = false; el.classList.add("found");
+        found++;
+        counter.textContent = `Mots trouvés : ${found} / ${words.length}`;
+        if (found === words.length) message.textContent = "Bravo ! Tous les mots ont disparu ! 🎉";
+        else message.textContent = `Bien joué ! Encore ${words.length-found} mot${words.length-found > 1 ? "s" : ""} à trouver.`;
+      });
+      items.push(item);
+    });
+    raf = requestAnimationFrame(animate);
+  }
+
+  function animate(time) {
+    if (!lastTime) lastTime = time;
+    const dt = Math.min((time-lastTime)/1000, .04);
+    lastTime = time;
+    if (!paused) {
+      const {w,h} = size();
+      for (const it of items) {
+        if (!it.alive) continue;
+        it.x += it.vx * dt; it.y += it.vy * dt;
+        if (it.x < it.halfW || it.x > w-it.halfW) {
+          it.vx *= -1; it.x = clamp(it.x, it.halfW, w-it.halfW);
+        }
+        if (it.y < it.halfH || it.y > h-it.halfH) {
+          it.vy *= -1; it.y = clamp(it.y, it.halfH, h-it.halfH);
+        }
+        it.el.style.left = it.x + "px";
+        it.el.style.top = it.y + "px";
+      }
+    }
+    raf = requestAnimationFrame(animate);
+  }
+
+  pauseBtn.addEventListener("click", () => {
+    paused = !paused;
+    pauseBtn.textContent = paused ? "▶ Reprendre" : "⏸ Pause";
+    message.textContent = paused ? "Jeu en pause." : "Clique sur un mot pour le faire disparaître !";
+  });
+  document.getElementById("restartBtn").addEventListener("click", createGame);
+  window.addEventListener("resize", () => {
+    const {w,h} = size();
+    for (const it of items) {
+      it.x = clamp(it.x, it.halfW, Math.max(it.halfW, w-it.halfW));
+      it.y = clamp(it.y, it.halfH, Math.max(it.halfH, h-it.halfH));
+    }
+  });
+  createGame();
+})();
+</script>
+</body>
+</html>
